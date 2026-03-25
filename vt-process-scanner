@@ -1,0 +1,491 @@
+import psutil
+import hashlib
+from vt import Client
+import csv
+from datetime import datetime
+from colorama import init, Fore, Style
+import json
+import os
+
+# Initialize colorama
+init(autoreset=True)
+
+# ===== Configuration =====
+WINDOWS_DIR = os.environ.get("WINDIR", r"C:\Windows")
+USERPROFILE = os.environ.get("USERPROFILE", "")
+APPDATA = os.environ.get("APPDATA", "")
+LOCALAPPDATA = os.environ.get("LOCALAPPDATA", "")
+TEMP = os.environ.get("TEMP", "")
+
+WHITELIST_FILE = "whitelist.json"
+API_KEY_FILE = "apikey.json"
+REPORTS_DIR = "reports"
+
+EXPECTED_SYSTEM_PATHS = {
+    "system": [],
+    "smss.exe": [os.path.join(WINDOWS_DIR, "System32", "smss.exe")],
+    "csrss.exe": [os.path.join(WINDOWS_DIR, "System32", "csrss.exe")],
+    "wininit.exe": [os.path.join(WINDOWS_DIR, "System32", "wininit.exe")],
+    "services.exe": [os.path.join(WINDOWS_DIR, "System32", "services.exe")],
+    "lsass.exe": [os.path.join(WINDOWS_DIR, "System32", "lsass.exe")],
+    "svchost.exe": [os.path.join(WINDOWS_DIR, "System32", "svchost.exe")],
+    "explorer.exe": [os.path.join(WINDOWS_DIR, "explorer.exe")],
+    "winlogon.exe": [os.path.join(WINDOWS_DIR, "System32", "winlogon.exe")],
+    "conhost.exe": [os.path.join(WINDOWS_DIR, "System32", "conhost.exe")],
+    "taskhostw.exe": [os.path.join(WINDOWS_DIR, "System32", "taskhostw.exe")],
+    "sihost.exe": [os.path.join(WINDOWS_DIR, "System32", "sihost.exe")],
+    "runtimebroker.exe": [os.path.join(WINDOWS_DIR, "System32", "RuntimeBroker.exe")],
+    "useroobebroker.exe": [os.path.join(WINDOWS_DIR, "System32", "oobe", "UserOOBEBroker.exe")],
+}
+
+WINDOWS_COMPONENTS = {
+    "dllhost.exe",
+    "fontdrvhost.exe",
+    "dwm.exe",
+    "wudfhost.exe",
+    "spoolsv.exe",
+    "wmiprvse.exe",
+    "searchindexer.exe",
+    "ctfmon.exe",
+    "smartscreen.exe",
+    "backgroundtaskhost.exe",
+    "applicationframehost.exe",
+    "searchhost.exe",
+    "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe",
+    "securityhealthservice.exe",
+    "securityhealthsystray.exe",
+    "dashost.exe",
+    "unsecapp.exe",
+    "shellhost.exe",
+    "systemsettings.exe",
+    "mousocoreworker.exe",
+    "aggregatorhost.exe",
+    "midisrv.exe",
+    "appactions.exe",
+    "crossdeviceresume.exe",
+}
+
+PSEUDO_PROCESSES = {
+    "system idle process",
+    "registry",
+    "memcompression",
+}
+
+THIRD_PARTY_APPS = {
+    "chrome.exe",
+    "firefox.exe",
+    "code.exe",
+    "steam.exe",
+    "discord.exe",
+    "spotify.exe",
+    "python.exe",
+    "malwarebytes.exe",
+    "msedgewebview2.exe",
+    "widgetsservice.exe",
+}
+
+# ===== Globals =====
+report = {}
+hash_cache = {}
+
+
+# ===== API Key Handling =====
+def load_api_key():
+    if os.path.exists(API_KEY_FILE):
+        with open(API_KEY_FILE, "r", encoding="utf-8") as f:
+            return json.load(f).get("api_key")
+    return None
+
+
+def save_api_key(api_key):
+    with open(API_KEY_FILE, "w", encoding="utf-8") as f:
+        json.dump({"api_key": api_key}, f, indent=4)
+
+
+def get_api_key():
+    api_key = load_api_key()
+    if api_key:
+        print(f"{Fore.CYAN}Loaded saved API key from {API_KEY_FILE}{Style.RESET_ALL}")
+        use_saved = input("Do you want to use this key? [Y/n]: ").strip().lower()
+        if use_saved != "n":
+            return api_key
+
+    api_key = input("Enter your VirusTotal API key: ").strip()
+    save_api_key(api_key)
+    print(f"{Fore.CYAN}API key saved to {API_KEY_FILE}{Style.RESET_ALL}")
+    return api_key
+
+
+# ===== Whitelist Handling =====
+def load_whitelist():
+    if os.path.exists(WHITELIST_FILE):
+        with open(WHITELIST_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_whitelist(whitelist):
+    with open(WHITELIST_FILE, "w", encoding="utf-8") as f:
+        json.dump(whitelist, f, indent=4)
+
+
+whitelist = load_whitelist()
+
+
+def is_whitelisted(file_hash):
+    return file_hash in whitelist
+
+
+# ===== Helper Functions =====
+def reset_report():
+    global report
+    report = {
+        "system": [],
+        "windows_components": [],
+        "third_party": [],
+        "unknown": [],
+        "suspicious_path": [],
+        "spoofed": [],
+        "malicious": [],
+        "whitelisted": [],
+        "ignored": [],
+    }
+
+
+def normalize_path(path):
+    return os.path.normcase(os.path.normpath(path))
+
+
+SUSPICIOUS_BASE_PATHS = [
+    normalize_path(TEMP) if TEMP else "",
+    normalize_path(APPDATA) if APPDATA else "",
+    normalize_path(LOCALAPPDATA) if LOCALAPPDATA else "",
+    normalize_path(os.path.join(USERPROFILE, "Downloads")) if USERPROFILE else "",
+]
+
+
+def is_suspicious_path(path):
+    norm_path = normalize_path(path)
+    for base in SUSPICIOUS_BASE_PATHS:
+        if base and norm_path.startswith(base):
+            return True
+    return False
+
+
+def is_expected_system_path(proc_name, proc_path):
+    expected_paths = EXPECTED_SYSTEM_PATHS.get(proc_name.lower(), [])
+    normalized_proc_path = normalize_path(proc_path)
+    normalized_expected = [normalize_path(p) for p in expected_paths]
+    return normalized_proc_path in normalized_expected
+
+
+def is_legit_system_process(proc):
+    try:
+        name = (proc.info.get("name") or "").lower()
+
+        if name not in EXPECTED_SYSTEM_PATHS:
+            return False
+
+        if name == "system":
+            return True
+
+        path = proc.exe()
+        return is_expected_system_path(name, path)
+
+    except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+        return False
+
+
+def is_windows_component(proc):
+    try:
+        name = (proc.info.get("name") or "").lower()
+        if name not in WINDOWS_COMPONENTS:
+            return False
+
+        path = proc.exe()
+        norm_path = normalize_path(path)
+
+        return (
+            norm_path.startswith(normalize_path(WINDOWS_DIR))
+            or norm_path.startswith(normalize_path(os.path.join(WINDOWS_DIR, "SystemApps")))
+        )
+    except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+        return False
+
+
+def get_file_hash(file_path):
+    norm_path = normalize_path(file_path)
+
+    if norm_path in hash_cache:
+        return hash_cache[norm_path]
+
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+
+    file_hash = sha256_hash.hexdigest()
+    hash_cache[norm_path] = file_hash
+    return file_hash
+
+
+def add_report_entry(category, name, pid, path="", vt_result=""):
+    report[category].append({
+        "name": name,
+        "pid": pid,
+        "path": path,
+        "vt_result": vt_result
+    })
+
+
+def check_virustotal(file_path, name, pid, client):
+    """
+    Returns one of:
+    - "whitelisted"
+    - "malicious"
+    - "clean"
+    - "error"
+    """
+    try:
+        file_hash = get_file_hash(file_path)
+
+        if is_whitelisted(file_hash):
+            print(f"{Fore.CYAN}[WL] Whitelisted process: {name} (PID {pid}) Path: {file_path}{Style.RESET_ALL}")
+            add_report_entry("whitelisted", name, pid, file_path, "whitelisted")
+            return "whitelisted"
+
+        response = client.get_object(f"/files/{file_hash}")
+
+        if response and response.last_analysis_stats.get("malicious", 0) > 0:
+            print(f"{Fore.RED}[!!!] MALICIOUS: {name} (PID {pid}) according to VirusTotal{Style.RESET_ALL}")
+
+            choice = input(
+                f"Do you trust {name} (PID {pid}) and want to add it to whitelist? [y/N]: "
+            ).strip().lower()
+
+            if choice == "y":
+                whitelist[file_hash] = {"name": name, "path": file_path}
+                save_whitelist(whitelist)
+                print(f"{Fore.CYAN}Process {name} added to whitelist.{Style.RESET_ALL}")
+                add_report_entry("whitelisted", name, pid, file_path, "whitelisted")
+                return "whitelisted"
+            else:
+                add_report_entry("malicious", name, pid, file_path, "malicious")
+                confirm = input(f"Terminate {name} (PID {pid})? [y/N]: ").strip().lower()
+                if confirm == "y":
+                    try:
+                        proc = psutil.Process(pid)
+                        proc.terminate()
+                        print(f"{Fore.RED}Process {name} (PID {pid}) terminated.{Style.RESET_ALL}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                        print(f"{Fore.YELLOW}Could not terminate {name} (PID {pid}): {e}{Style.RESET_ALL}")
+                return "malicious"
+
+        print(f"{Fore.YELLOW}[?] Unknown but clean: {name} (PID {pid}){Style.RESET_ALL}")
+        return "clean"
+
+    except Exception as e:
+        print(f"{Fore.YELLOW}[?] Unknown process: {name} (PID {pid}) Path could not be checked ({e}){Style.RESET_ALL}")
+        return "error"
+
+
+def ensure_reports_dir():
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+
+
+# ===== Main Scan Function =====
+def run_scan(api_key):
+    global hash_cache
+    reset_report()
+    hash_cache = {}
+
+    ensure_reports_dir()
+
+    client = Client(api_key)
+    print(f"{Fore.CYAN}Scanning processes...\n{Style.RESET_ALL}")
+
+    for proc in psutil.process_iter(['pid', 'name']):
+        name = (proc.info.get('name') or "").lower()
+        pid = proc.info.get('pid')
+
+        if name in PSEUDO_PROCESSES:
+            print(f"{Fore.BLUE}[-] Ignored pseudo-process: {name} (PID {pid}){Style.RESET_ALL}")
+            add_report_entry("ignored", name, pid, "pseudo-process", "ignored")
+            continue
+
+        if is_legit_system_process(proc):
+            print(f"{Fore.GREEN}[OK] System process: {name} (PID {pid}){Style.RESET_ALL}")
+            add_report_entry("system", name, pid, "", "trusted")
+
+        elif is_windows_component(proc):
+            try:
+                path = proc.exe()
+            except Exception:
+                path = ""
+            print(f"{Fore.CYAN}[OK] Windows component: {name} (PID {pid}){Style.RESET_ALL}")
+            add_report_entry("windows_components", name, pid, path, "trusted")
+
+        elif name in THIRD_PARTY_APPS:
+            print(f"{Fore.GREEN}[OK] Known third-party app: {name} (PID {pid}){Style.RESET_ALL}")
+            add_report_entry("third_party", name, pid, "", "trusted")
+
+        else:
+            try:
+                path = proc.exe()
+
+                if name in EXPECTED_SYSTEM_PATHS and name != "system" and not is_expected_system_path(name, path):
+                    print(f"{Fore.MAGENTA}[!!!] SPOOFED SYSTEM PROCESS: {name} (PID {pid}) Path: {path}{Style.RESET_ALL}")
+
+                    confirm = input(f"Terminate spoofed process {name} (PID {pid})? [y/N]: ").strip().lower()
+                    if confirm == "y":
+                        try:
+                            proc.terminate()
+                            print(f"{Fore.RED}Spoofed process {name} (PID {pid}) terminated.{Style.RESET_ALL}")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                            print(f"{Fore.YELLOW}Could not terminate spoofed process {name} (PID {pid}): {e}{Style.RESET_ALL}")
+
+                    vt_result = check_virustotal(path, name, pid, client)
+                    if vt_result not in ("malicious", "whitelisted"):
+                        add_report_entry("spoofed", name, pid, path, vt_result)
+
+                elif is_suspicious_path(path):
+                    print(f"{Fore.LIGHTMAGENTA_EX}[!] Suspicious path: {name} (PID {pid}) Path: {path}{Style.RESET_ALL}")
+                    vt_result = check_virustotal(path, name, pid, client)
+                    if vt_result not in ("malicious", "whitelisted"):
+                        add_report_entry("suspicious_path", name, pid, path, vt_result)
+
+                else:
+                    print(f"{Fore.YELLOW}[?] Unknown process: {name} (PID {pid}) Path: {path}{Style.RESET_ALL}")
+                    vt_result = check_virustotal(path, name, pid, client)
+                    if vt_result not in ("malicious", "whitelisted"):
+                        add_report_entry("unknown", name, pid, path, vt_result)
+
+            except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+                print(f"{Fore.YELLOW}[?] Unknown process: {name} (PID {pid}) Path: Access Denied or process ended{Style.RESET_ALL}")
+                add_report_entry("unknown", name, pid, "Access Denied or ended", "error")
+
+    client.close()
+
+    # ===== Print Final Report =====
+    print(f"\n{Fore.CYAN}=== SCAN REPORT ==={Style.RESET_ALL}")
+    for category in report:
+        color = (
+            Fore.GREEN if category in ["system", "third_party"]
+            else Fore.CYAN if category in ["windows_components", "whitelisted", "ignored"]
+            else Fore.RED if category == "malicious"
+            else Fore.MAGENTA if category in ["spoofed", "suspicious_path"]
+            else Fore.YELLOW
+        )
+
+        print(f"{color}{category.upper()} ({len(report[category])}):{Style.RESET_ALL}")
+        for item in report[category]:
+            print(
+                f"  {item['name']} (PID {item['pid']}) "
+                f"Path: {item['path']} "
+                f"VT: {item['vt_result']}"
+            )
+
+    # ===== Export CSV =====
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_file = os.path.join(REPORTS_DIR, f"process_scan_report_{timestamp}.csv")
+
+    with open(csv_file, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Category", "Process Name", "PID", "Path", "VT Result"])
+        for category, items in report.items():
+            for item in items:
+                writer.writerow([
+                    category,
+                    item["name"],
+                    item["pid"],
+                    item["path"],
+                    item["vt_result"]
+                ])
+
+    print(f"\nReport saved to {csv_file}")
+
+
+# ===== Whitelist Menu =====
+def manage_whitelist():
+    global whitelist
+
+    while True:
+        print(f"\n{Fore.CYAN}=== WHITELIST MENU ==={Style.RESET_ALL}")
+        print("1. View whitelist")
+        print("2. Remove entry from whitelist")
+        print("3. Clear whitelist")
+        print("4. Back to main menu")
+
+        choice = input("Select option: ").strip()
+
+        if choice == "1":
+            if whitelist:
+                print(f"\n{Fore.CYAN}Current Whitelist:{Style.RESET_ALL}")
+                for h, info in whitelist.items():
+                    print(f"- {info['name']} | Path: {info['path']} | Hash: {h[:12]}...")
+            else:
+                print(f"{Fore.YELLOW}Whitelist is empty.{Style.RESET_ALL}")
+
+        elif choice == "2":
+            if not whitelist:
+                print(f"{Fore.YELLOW}Whitelist is empty.{Style.RESET_ALL}")
+                continue
+
+            print("Enter hash prefix to remove (at least 6 characters):")
+            prefix = input("> ").strip()
+            to_remove = [h for h in whitelist if h.startswith(prefix)]
+
+            if to_remove:
+                for h in to_remove:
+                    removed = whitelist.pop(h)
+                    print(f"{Fore.RED}Removed {removed['name']} from whitelist.{Style.RESET_ALL}")
+                save_whitelist(whitelist)
+            else:
+                print(f"{Fore.YELLOW}No match found.{Style.RESET_ALL}")
+
+        elif choice == "3":
+            confirm = input("Are you sure you want to clear the whitelist? [y/N]: ").strip().lower()
+            if confirm == "y":
+                whitelist.clear()
+                save_whitelist(whitelist)
+                print(f"{Fore.RED}Whitelist cleared.{Style.RESET_ALL}")
+
+        elif choice == "4":
+            break
+
+        else:
+            print(f"{Fore.YELLOW}Invalid option.{Style.RESET_ALL}")
+
+
+# ===== Main Menu =====
+def main_menu(api_key):
+    while True:
+        print(f"\n{Fore.LIGHTRED_EX}## === VIRUS TOTAL - PROCESS SCANNER === ##{Style.RESET_ALL}")
+        print(f"\n{Fore.GREEN}## --- Created by André Pinho - 09/2025 --- ##{Style.RESET_ALL}")
+        print(f"\n{Fore.CYAN}=== MAIN MENU ==={Style.RESET_ALL}")
+        print("1. Run process scan")
+        print("2. Manage whitelist")
+        print("3. Exit")
+
+        choice = input("Select option: ").strip()
+
+        if choice == "1":
+            run_scan(api_key)
+        elif choice == "2":
+            manage_whitelist()
+        elif choice == "3":
+            print(
+                f"\n{Fore.GREEN}Thanks for using my software.\n"
+                f"If you like this software, support please!\n"
+                f"{Fore.BLUE}WWW.INFORPINHO.COM{Style.RESET_ALL}"
+            )
+            break
+        else:
+            print(f"{Fore.YELLOW}Invalid option.{Style.RESET_ALL}")
+
+
+# ===== Run =====
+if __name__ == "__main__":
+    api_key = get_api_key()
+    main_menu(api_key)
