@@ -4,45 +4,61 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
-A lightweight Windows process threat triage tool built in Python.
+VT Process Scanner is a lightweight Windows process triage tool built in Python.
 
-This tool enumerates running processes, detects suspicious behavior (such as spoofed system binaries), and integrates with VirusTotal to provide reputation-based analysis.
+It enumerates running processes, classifies them into meaningful categories, detects suspicious execution paths, and integrates with VirusTotal for reputation-based analysis.
+
+This tool is designed for **defensive security**, **malware triage**, and **incident response practice**.
 
 ---
 
 ## 🎯 Purpose
 
-Designed for:
+This project was built to help analyze running Windows processes and quickly identify:
 
-* 🔍 Malware analysis practice
-* 🛠️ Incident response triage
-* 🧪 Security research and experimentation
+* trusted system processes
+* trusted Windows components
+* known third-party applications
+* suspicious executables running from risky locations
+* potentially malicious processes flagged by VirusTotal
 
 ---
 
 ## ✨ Features
 
-* 🔍 Real-time process scanning using `psutil`
-* 🔑 VirusTotal integration (`vt-py`)
-* 🧠 Detection of spoofed system processes
-* 📝 Persistent whitelist system (`whitelist.json`)
-* 🎨 Color-coded CLI output:
+* 🔍 Enumerates running Windows processes using `psutil`
+* 🧠 Classifies processes into:
 
-  * 🟢 Safe
-  * 🟡 Unknown
-  * 🔴 Malicious
-* 📊 Automatic CSV report generation
-* ⚡ Interactive menu interface
+  * System
+  * Windows Components
+  * Known Third-Party Apps
+  * Unknown
+  * Suspicious Path
+  * Spoofed
+  * Malicious
+  * Whitelisted
+  * Ignored pseudo-processes
+* 🚩 Detects suspicious execution from:
+
+  * `%Temp%`
+  * `%AppData%`
+  * `%LocalAppData%`
+  * `Downloads`
+* 🔑 Integrates with VirusTotal using `vt-py`
+* 📝 Supports a persistent local whitelist
+* 📊 Exports timestamped CSV reports to the `reports/` folder
+* 🎨 Color-coded CLI output with `colorama`
 
 ---
 
 ## 🖥️ How It Works
 
-1. Enumerates all running processes
-2. Validates known system processes
-3. Detects anomalies (e.g., fake `svchost.exe`)
-4. Queries VirusTotal for unknown executables
-5. Outputs results and saves a report
+1. Enumerates active processes
+2. Validates known Windows system process paths
+3. Detects trusted Windows components
+4. Detects suspicious execution paths
+5. Queries VirusTotal for unknown or suspicious binaries
+6. Generates a structured report in the terminal and in CSV format
 
 ---
 
@@ -71,40 +87,83 @@ python scanner.py
 ```
 
 On first run, insert your VirusTotal API key.
+The key will be saved locally in `apikey.json`.
 
 ---
 
-## 📊 Example Output
+## 📊 Example Categories
 
-```
-[OK] System process: services.exe (PID 672)
-[OK] Known app: chrome.exe (PID 2140)
-[!!!] SPOOFED: svchost.exe (PID 3024) Path: C:\Users\...
-[!!!] MALICIOUS: badprocess.exe (PID 5001)
-```
+The scanner can classify processes into categories such as:
+
+* **SYSTEM** → core Windows processes
+* **WINDOWS_COMPONENTS** → legitimate Windows components outside the core set
+* **THIRD_PARTY** → known applications such as Chrome, VS Code, and Malwarebytes
+* **SUSPICIOUS_PATH** → binaries executing from temporary or user-controlled locations
+* **UNKNOWN** → processes not yet recognized locally but not flagged as malicious
+* **MALICIOUS** → VirusTotal detections
+* **IGNORED** → pseudo-processes such as `Registry` or `MemCompression`
 
 ---
 
 ## 📁 Project Structure
 
-```
+```text
 vt-process-scanner/
 ├── scanner.py
 ├── requirements.txt
 ├── whitelist.json
 ├── apikey.json
-└── reports/
+├── reports/
+└── README.md
 ```
+
+---
+
+## 📄 Output
+
+Each scan generates a CSV report containing:
+
+* category
+* process name
+* PID
+* path
+* VirusTotal result
+
+Reports are stored in:
+
+```text
+reports/
+```
+
+---
+
+## ⚠️ Limitations
+
+* This is not a full antivirus or EDR solution
+* Detection quality depends partly on VirusTotal coverage
+* Some legitimate vendor-specific processes may still appear as `UNKNOWN`
+* Final analyst validation is still important before taking action
+
+---
+
+## 🧠 Lessons Learned
+
+* Path-based process validation is essential to avoid false positives
+* Legitimate Windows systems contain many non-core components that should be classified separately
+* Suspicious execution paths provide strong triage value even when a file is clean on VirusTotal
+* Clear categorization improves signal-to-noise ratio during process analysis
 
 ---
 
 ## ⚠️ Disclaimer
 
-This tool is for educational and research purposes only.
-Always verify VirusTotal results before taking action.
+This tool is intended for educational, research, and defensive security purposes only.
+
+Always validate findings before terminating or removing processes.
 
 ---
 
 ## 👨‍💻 Author
 
-André – Cybersecurity Enthusiast
+André Pinho
+Cybersecurity / Malware Analysis / Incident Response
