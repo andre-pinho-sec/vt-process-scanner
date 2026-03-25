@@ -167,3 +167,19 @@ Always validate findings before terminating or removing processes.
 
 André Pinho
 Cybersecurity / Malware Analysis / Incident Response
+
+---
+
+## 📸 Screenshots
+
+### Main Menu
+![Main Menu](screenshots/main_menu.png)
+
+### Process Scan
+![Scan Output](screenshots/scan_output.png)
+
+### Suspicious Detection
+![Suspicious Detection](screenshots/suspicious.png)
+
+### CSV Report Output
+![CSV Report](screenshots/csv_report.png)
