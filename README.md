@@ -85,7 +85,7 @@ pip install -r requirements.txt
 ## 🚀 Usage
 
 ```bash
-python scanner.py
+python vt-process-scanner.py
 ```
 
 ---
