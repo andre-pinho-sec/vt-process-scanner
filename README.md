@@ -49,7 +49,7 @@ Designed for:
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/yourusername/vt-process-scanner.git
+git clone https://github.com/andre-pinho-sec/vt-process-scanner.git
 cd vt-process-scanner
 ```
 
