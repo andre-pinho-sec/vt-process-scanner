@@ -4,23 +4,24 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
-VT Process Scanner is a lightweight Windows process triage tool built in Python.
+![Scan Output](screenshots/scan_output.png)
 
-It enumerates running processes, classifies them into meaningful categories, detects suspicious execution paths, and integrates with VirusTotal for reputation-based analysis.
+VT Process Scanner is a Windows process analysis and threat triage tool built in Python, designed to identify, classify, and assess running processes in real time.
 
-This tool is designed for **defensive security**, **malware triage**, and **incident response practice**.
+It combines intelligent process classification, suspicious execution path detection, and VirusTotal integration to provide fast and reliable reputation-based insights for security analysis.
 
+This tool is built for **defensive security**, **malware triage**, and **incident response workflows**, making it ideal for learning, experimentation, and real-world analysis scenarios.
 ---
 
 ## 🎯 Purpose
 
-This project was built to help analyze running Windows processes and quickly identify:
+This project was built to analyze running Windows processes and support rapid identification of:
 
 * trusted system processes
-* trusted Windows components
+* legitimate Windows components
 * known third-party applications
-* suspicious executables running from risky locations
-* potentially malicious processes flagged by VirusTotal
+* executables running from suspicious or abnormal locations
+* potentially malicious processes based on VirusTotal reputation analysis
 
 ---
 
@@ -38,12 +39,13 @@ This project was built to help analyze running Windows processes and quickly ide
   * Malicious
   * Whitelisted
   * Ignored pseudo-processes
-* 🚩 Detects suspicious execution from:
 
+* 🚩 Detects suspicious execution from:
   * `%Temp%`
   * `%AppData%`
   * `%LocalAppData%`
   * `Downloads`
+
 * 🔑 Integrates with VirusTotal using `vt-py`
 * 📝 Supports a persistent local whitelist
 * 📊 Exports timestamped CSV reports to the `reports/` folder
@@ -86,8 +88,20 @@ pip install -r requirements.txt
 python scanner.py
 ```
 
+---
+
+## 🔑 Configuration
+
 On first run, insert your VirusTotal API key.
 The key will be saved locally in `apikey.json`.
+
+Create an `apikey.json` file with your VirusTotal API key:
+
+```json
+{
+    "api_key": "YOUR_API_KEY_HERE"
+}
+```
 
 ---
 
@@ -109,11 +123,12 @@ The scanner can classify processes into categories such as:
 
 ```text
 vt-process-scanner/
-├── scanner.py
+├── vt-process-scanner.py
 ├── requirements.txt
 ├── whitelist.json
 ├── apikey.json
 ├── reports/
+├── screenshoots/
 └── README.md
 ```
 
@@ -148,10 +163,10 @@ reports/
 
 ## 🧠 Lessons Learned
 
-* Path-based process validation is essential to avoid false positives
-* Legitimate Windows systems contain many non-core components that should be classified separately
-* Suspicious execution paths provide strong triage value even when a file is clean on VirusTotal
-* Clear categorization improves signal-to-noise ratio during process analysis
+* Path-based validation is critical to reduce false positives
+* Windows environments include many legitimate non-core processes
+* Suspicious execution paths provide strong triage signals even when files appear clean
+* Clear classification significantly improves analysis eficiency
 
 ---
 
